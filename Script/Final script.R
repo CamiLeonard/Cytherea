@@ -19,7 +19,7 @@ library(FactoMineR)
 library(rstatix)
 library(hms)
 library(fmsb)
-
+library(mvabund)
 
 
 cytcolors<-c(Linareva="#BC4B07",Mahana="#D3BC38",Manava="#5BA7A3",Nursery="#424242")
@@ -54,10 +54,23 @@ temp<-ggplot(total,aes(x=timestamp))+ylab("Water temperature (°C)")+xlab("")+
   scale_x_datetime(date_labels = "%Y-%m",date_breaks="30 days")+
   theme_classic()+
   theme(axis.text.x = element_text(angle = 90))
+temp
 ggsave("Output/Temp.pdf",temp,width = 9, height = 4)
 ggsave("Output/Temp.svg",temp,width = 9, height = 4)
 
 ##Temperature stats
+library(tseries)
+adf.test(total$Linareva)
+adf.test(total$Mahana)
+adf.test(total$Manava)
+adf.test(total$Nursery)
+##all show constant variance over the 3 measured months
+M=cor(total[,2:5],use="pairwise.complete.obs")
+res1 <- cor.mtest(total[,2:5], conf.level = 0.95)
+pvalues<-as.data.frame(res1$p)
+corrplot(M, method = 'color',tl.col = 'black',p.mat = res1$p,sig.level = 0.05,insig = "blank")
+cov(total[,2:5],use="pairwise.complete.obs")
+
 total2<-gather(total,"Site","Temp",Manava,Mahana,Linareva,Nursery)
 total2$Day<-as.Date(total2$timestamp,format="%Y-%m-%d")
 totalmean<-ddply(total2,c("Day","Site"),summarise,Mean=mean(Temp),Max=max(Temp),Min=min(Temp))
@@ -148,6 +161,12 @@ aggregate(genus~Site,genera2,sem)
 mean(genera2$genus)
 sem(genera2$genus)
 
+cyth<-transects %>% filter(ID2=="CYTHEREA")
+cyth2<-ddply(cyth,c('Site','transect'),summarise,sum=sum(Percent))
+cyth2<-rbind(cyth2,c("Linareva",3,0))
+cyth2<-rbind(cyth2,c("Linareva",6,0))
+mean(as.numeric(cyth2$sum))
+sem(as.numeric(cyth2$sum))
 
 ##Transects Graphs
 bentcolors<-c("Dead coral"="#E4E8F5","Fauna"="#f09ebc", "Live coral"="#F55839CC", "Macroalgae"="#82ad45", "Sediment"="#EDC285")
@@ -373,7 +392,7 @@ growth$gf<-(growth$final_size-growth$Initial_size)*100/(growth$Initial_size*grow
 ## models
 finalgrowth<-growth %>% filter(Time=="total")
 hist(finalgrowth$gf)
-final<-finalgrowth %>% filter(site!="Nursery")
+final<-finalgrowth %>% filter(Site!="Nursery")
 mod1<-lm(gf~Genotype*Site*State+Initial_size,final)
 Anova(mod1)
 plot(mod1)
@@ -415,7 +434,7 @@ aov$'Pr(>Chisq)'<-round(aov$'Pr(>Chisq)',3)
 aov$'Pr(>Chisq)'[aov$'Pr(>Chisq)'==0.000]<-"<0.001"
 aov$predictor<-str_replace_all(aov$predictor,":","*")
 write_xlsx(aov,"Output/Growthmodel.xlsx")
-pairwise.wilcox.test(growth2$gf,growth2$Genotype)
+pairwise.wilcox.test(growth2$gf,growth2$Site)
 
 growth2<-growth1 %>% filter(Treatment=="Transplant" & State!="OK")
 mod1<-lmer(gf~Initial_size+Genotype*Site*Time+(1|colony),growth2)
@@ -452,11 +471,13 @@ aggregate(gf~Year,growth1,mean)
 aggregate(gf~Year,growth1,sem)
 
 growth1<-growth %>% filter(Time!="total" & Treatment=="Transplant" & State=="OK")
+growth2<-growth1 %>% filter(Time=="October 2021")
+pairwise.wilcox.test(growth2$gf, growth2$Site)
 aggregate(gf~Year,growth1,mean)
 aggregate(gf~Year,growth1,sem)
 
 
-growth1<-growth %>% filtermeansComp()growth1<-growth %>% filter(Time!="total")
+growth1<-growth %>% filter(Time!="total")
 growth2<-growth1 %>% filter(Site=="Nursery")
 cor.test(growth2$gf,growth2$Initial_size)
 growth2<-growth1 %>% filter(Site!="Nursery")
@@ -509,7 +530,9 @@ yearly$genotype<-as.factor(yearly$genotype)
 yearly$year<-paste("Year",yearly$year,sep=" ")
 yearly$days<-as.numeric(yearly$date2-yearly$date1)
 yearly$gf<-(yearly$final_size-yearly$initial_size)*100/(yearly$initial_size*yearly$days)
-yearly2<-yearly %>% filter(year=="Year 1")
+yearly2<-yearly %>% filter(site!="Nursery")
+aggregate(gf~year, yearly2, mean)
+aggregate(gf~year, yearly2, sem)
 pairwise.wilcox.test(yearly2$gf,yearly2$site)
 
 yearplot<-ggplot(yearly, aes(x=year,y=gf,fill=Site)) +
@@ -577,26 +600,35 @@ maturity2<-maturity %>% filter(Treatment=="Control")
 maturity2<-ddply(maturity,c("site","year"),summarise,percent=sum(maturity)/length(maturity)*100,se=sem(maturity)*100)
 mat1<-ggplot(maturity2,aes(y=percent,x=site,fill=site)) +
   geom_bar(colour="black",stat="identity")+
-  geom_errorbar(aes(x=site, ymin=percent-se, ymax=percent+se),width=0.2)+
+  geom_linerange(aes(x=site, ymin=percent-se, ymax=percent+se))+
   theme_bw()+
   ylab("Percent maturity")+
   xlab("Site")+
   facet_grid(~year)+
-  theme(legend.position = "none",axis.title.x = element_blank())+
+  theme(legend.position = "none",
+        axis.text.x = element_blank())+
+  xlab("")+
   scale_fill_manual(values=cytcolors)
+mat1
 
 maturity$mature<-str_to_sentence(maturity$mature)
-mat2<-ggplot(maturity, aes(x=mature,y=size,fill=site)) +
-  geom_boxplot(position = position_dodge(preserve = "single"))+
+maturity3<-ddply(maturity[maturity$size>0,],c("site","year","mature"),summarise,meansize=mean(size,na.rm=TRUE),
+                 se=sem(size))
+dodge <- position_dodge2(width = 0.9,preserve = "single")
+mat2<-ggplot(maturity3[-15,], aes(x=mature,y=meansize, fill=site)) +
+  geom_bar(colour="black",stat="identity",position =dodge)+
+  geom_linerange(aes(x=mature, ymin=meansize-se, ymax=meansize+se),
+                 position =dodge)+
   ylab(expression(paste("Surface in cm"^{2})))+
   theme_bw()+
-  theme(legend.position = c(0.2,0.78),axis.title.x = element_blank())+
+  theme(legend.position = c(0.2,0.65),axis.title.x = element_blank())+
   scale_fill_manual(values=cytcolors)+
   facet_grid(~year)
-mat<-ggarrange(mat1,mat2)
+mat2 
+mat<-ggarrange(mat1,mat2,widths=c(0.5,1))
 mat
-ggsave("Output/maturity.pdf",mat,width = 10, height = 4)
-ggsave("Output/maturity.svg",mat,width = 10, height = 4)
+ggsave("Output/maturity.pdf",mat,width = 10, height = 3)
+ggsave("Output/maturity.svg",mat,width = 10, height = 3)
 
 ##binary logistic regression to predict size for 95% maturity
 maturity2<-maturity %>% filter(Treatment=="Transplant")
@@ -699,72 +731,110 @@ ggsave("Output/symbionts.svg",fig,width = 10, height = 5.5)
 Abundance<-as.data.frame(Abundance)
 Abundance$time<-as.character(Abundance$time)
 Abundance$genotype<-as.character(Abundance$genotype)
-Abundance$site[Abundance$time=="T0"]<-"Nursery"
+Abundance$site2<-Abundance$site
+Abundance$site2[Abundance$time=="T0"]<-"Nursery"
 Abundance[,2:202]<-mutate_all(Abundance[,2:202], function(x) as.numeric(as.character(x)))
-model<-Abundance %>% filter(time=="T0")
-dist <- vegdist(model[,2:202], method="bray")
-pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
-
+Abundance$treatment<-"Transplant"
+Abundance$treatment[Abundance$site2=="Nursery"]<-"Control"
+dist <- vegdist(Abundance[,2:202], method="bray") 
+permanova<-adonis2(dist ~ genotype*treatment*time, data=Abundance, permutations=9999)
+permanova
+permanova<-adonis2(dist ~ genotype*site2*time, data=Abundance, permutations=9999)
+permanova
 model<-Abundance %>% filter(site=="Nursery")
 dist <- vegdist(model[,2:202], method="bray") 
 permanova <- adonis2(dist ~ genotype*time, data=model, permutations=9999)
 permanova
-pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
 
-model<-Abundance %>% filter(site!="Nursery")
-dist <- vegdist(model[,2:202], method="bray") 
-permanova <- adonis2(dist ~ site*time, data=model, permutations=9999)
-permanova
-pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
-
-model<-Abundance %>% filter(site=="Nursery" & genotype=="2")
+model<-Abundance %>% filter(time=="T0")
 dist <- vegdist(model[,2:202], method="bray")
-pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
-
-dist <- vegdist(Abundance[,2:202], method="bray")
-permanova <- adonis2(dist ~ genotype*time*site, data=Abundance, permutations=9999)
-permanova
-pairwise.adonis(dist, factors = Abundance$site, p.adjust.m = "BH")
-pairwise.adonis(dist, factors = Abundance$time, p.adjust.m = "BH")
+adonis2(dist ~ genotype*site, data=model, permutations=9999)
+pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
+pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
 
 model<-Abundance %>% filter(time!="T0")
 dist <- vegdist(model[,2:202], method="bray")
-permanova <- adonis2(dist ~ genotype*time*site, data=model, permutations=9999)
+permanova <- adonis2(dist ~ genotype*site*time, data=model, permutations=9999)
 permanova
-
 model<-Abundance %>% filter(time=="T12")
 dist <- vegdist(model[,2:202], method="bray")
 permanova <- adonis2(dist ~ genotype*site, data=model, permutations=9999)
 permanova
-pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
-model<-Abundance %>% filter(time=="T12" & genotype=="10")
-dist <- vegdist(model[,2:202], method="bray")
-pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
-
 model<-Abundance %>% filter(time=="T27")
 dist <- vegdist(model[,2:202], method="bray")
-permanova <- adonis2(dist ~ site, data=model, permutations=9999)
-permanova <- adonis2(dist ~ genotype, data=model, permutations=9999)
 permanova <- adonis2(dist ~ genotype*site, data=model, permutations=9999)
-permanova
-
-#colonies do seem to change after transplantation, especially genet 10 and 8. Maybe we don't have enough replicates and need to group transplants together
-ITS2$treatment<-"Transplant"
-ITS2$treatment[ITS2$site=="Nursery"]<-"Control"
-model<-ITS2 %>% filter(time=="T12")
-dist <- vegdist(model[,9:204], method="bray")
 permanova <- adonis2(dist ~ genotype*treatment, data=model, permutations=9999)
 permanova
-pairwise.adonis(dist, factors = model$treatment, p.adjust.m = "BH")
-model<-ITS2 %>% filter(time=="T12" & genotype=="9")
-dist <- vegdist(model[,9:204], method="bray")
+
+model<-Abundance %>% filter(time=="T12" & genotype=="8")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
 pairwise.adonis(dist, factors = model$treatment, p.adjust.m = "BH")
 
-model<-ITS2 %>% filter(time=="T27" & genotype=="10")
-dist <- vegdist(model[,9:204], method="bray")
+model<-Abundance %>% filter(genotype=="9")
+dist <- vegdist(model[,2:202], method="bray")
+adonis2(dist ~ site2*time, data=model, permutations=9999)
+pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
+pairwise.adonis(dist, factors = model$site2, p.adjust.m = "BH")
+
+model<-Abundance %>% filter(genotype=="10" & site=="Nursery")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
+
+model<-Abundance %>% filter(genotype=="10" & time=="T12")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
+
+symsp<-mvabund(Abundance[,2:202])
+mod1 <- manyglm(symsp ~ Abundance$genotype*Abundance$site2*Abundance$time, family = "negative_binomial")
+anova(mod1)
+
+
+symsp<-mvabund(model[,2:202])
+mod1 <- manyglm(symsp ~ model$treatment, family = "negative_binomial")
+anova(mod1)
+mod1 <- manyglm(symsp ~ model$site, family = "negative_binomial")
+anova(mod1)
+anova(mod1, pairwise.comp=model$site)
+
+model<-Abundance %>% filter(time=="T12" & site=="Nursery")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
+symsp<-mvabund(model[,2:202])
+mod1 <- manyglm(symsp ~ model$genotype, family = "negative_binomial")
+anova(mod1, pairwise.comp=model$genotype)
+
+model<-Abundance %>% filter(time=="T12" & site=="Linareva")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
+symsp<-mvabund(model[,2:202])
+mod1 <- manyglm(symsp ~ model$genotype, family = "negative_binomial")
+anova(mod1, pairwise.comp=model$genotype)
+
+model<-Abundance %>% filter(time=="T12" & site=="Mahana")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
+symsp<-mvabund(model[,2:202])
+mod1 <- manyglm(symsp ~ model$genotype, family = "negative_binomial")
+anova(mod1, pairwise.comp=model$genotype)
+
+model<-Abundance %>% filter(time=="T12" & site=="Manava")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
+symsp<-mvabund(model[,2:202])
+mod1 <- manyglm(symsp ~ model$genotype, family = "negative_binomial")
+anova(mod1, pairwise.comp=model$genotype)
+
+model<-Abundance %>% filter(site=="Manava")
+dist <- vegdist(model[,2:202], method="bray")
+adonis2(dist ~ genotype*time, data=model, permutations=9999)
+pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
+
+model<-Abundance %>% filter(time=="T27" & genotype=="10")
+dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$treatment, p.adjust.m = "BH")
-model<-ITS2 %>% filter(time=="T27")
-dist <- vegdist(model[,9:204], method="bray")
+model<-Abundance %>% filter(time=="T27")
+dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
 
 #link symbiont diversity with time of death and growth
@@ -815,28 +885,30 @@ fig<-ggplot(graph, aes(x=colony, y=percent*100, fill=strain)) +
   xlab("Colony")
 fig
 
+
+
 M=cor(data[,6:13],use="pairwise.complete.obs")
 res1 <- cor.mtest(data[,6:13], conf.level = 0.95)
 pvalues<-as.data.frame(res1$p)
-corrplot(M, method = 'color',tl.col = 'black',p.mat = res1$p,sig.level = 0.05,insig = "blank")
+corrplot(M, method = 'color',type = 'lower',tl.col = 'black',p.mat = res1$p,sig.level = 0.05,insig = "blank")
 #save svg 600x520
 data2<-data %>% filter(site!="Nursery")
 M=cor(data2[,6:13],use="pairwise.complete.obs")
 res1 <- cor.mtest(data2[,6:13], conf.level = 0.95)
 pvalues<-as.data.frame(res1$p)
-corrplot(M, method = 'color',tl.col = 'black',p.mat = res1$p,sig.level = 0.05,insig = "blank")
+corrplot(M, method = 'color',type = 'lower',tl.col = 'black',p.mat = res1$p,sig.level = 0.05,insig = "blank")
 
 ##do initial clades influence survival pattern
-data0<-data[data$time=="T0",c(2,9:11)]
+data0<-data[data$time=="T0",c(2,9:12)]
 data0$colony<-as.factor(data0$colony)
 surv2$colony<-as.factor(surv2$colony)
 surv3<-inner_join(surv2,data0,by="colony")
-cox <- coxph(Surv(month, dead) ~ site*genotype+cladeA+cladeC+cladeD, data = surv3)
+cox <- coxph(Surv(month, dead) ~ site*genotype+CladeA+CladeC+CladeD, data = surv3)
 Anova(cox)
 
 ##PCA
 
-pca1<-PCA(data[,6:12])
+pca1<-PCA(data[,6:13])
 pca.vars <- pca1$var$coord %>% data.frame
 pca.vars$vars <- rownames(pca.vars)
 pca.vars.m <- melt(pca.vars, id.vars = "vars")
@@ -861,4 +933,28 @@ Pca
 ggsave("Output/PCA.jpg",Pca,width=9,height=4)
 ggsave("Output/PCA.svg",Pca,width=9,height=4)
 
+datafin<-data %>% filter(colony %in% data$colony[data$time=="T27"])
+pca1<-PCA(datafin[,7:12])
+pca.vars <- pca1$var$coord %>% data.frame
+pca.vars$vars <- rownames(pca.vars)
+pca.vars.m <- melt(pca.vars, id.vars = "vars")
+datafin$pc1 <- pca1$ind$coord[, 1]
+datafin$pc2 <- pca1$ind$coord[, 2]
 
+Pca<-ggplot(data = datafin, aes(x = pc1, y = pc2,color=genotype,shape=site)) +
+  geom_point()+
+  facet_grid(~time)+
+  geom_segment(data = pca.vars, inherit.aes =F, aes(x = 0, xend = Dim.1, y = 0, 
+                                                    yend = Dim.2),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  geom_text(data = pca.vars, inherit.aes =F,
+            aes(x = Dim.1*1.5, y =  Dim.2*1.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (38.95% variance)",y="PCA2 (22.17% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="right")
+Pca
+ggsave("Output/PCA2.jpg",Pca,width=8,height=4)
+ggsave("Output/PCA2.svg",Pca,width=8,height=4)
