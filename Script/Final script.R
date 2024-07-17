@@ -20,6 +20,7 @@ library(rstatix)
 library(hms)
 library(fmsb)
 library(mvabund)
+library(reshape2)
 
 
 cytcolors<-c(Linareva="#BC4B07",Mahana="#D3BC38",Manava="#5BA7A3",Nursery="#424242")
@@ -65,6 +66,7 @@ adf.test(total$Mahana)
 adf.test(total$Manava)
 adf.test(total$Nursery)
 ##all show constant variance over the 3 measured months
+
 M=cor(total[,2:5],use="pairwise.complete.obs")
 res1 <- cor.mtest(total[,2:5], conf.level = 0.95)
 pvalues<-as.data.frame(res1$p)
@@ -76,9 +78,10 @@ total2$Day<-as.Date(total2$timestamp,format="%Y-%m-%d")
 totalmean<-ddply(total2,c("Day","Site"),summarise,Mean=mean(Temp),Max=max(Temp),Min=min(Temp))
 totalmean$Range<-totalmean$Max-totalmean$Min
 shapiro.test(totalmean$Mean)
+bartlett.test(Mean ~ Site, data = totalmean)
 anova_test(totalmean,Mean~Site)
 shapiro.test(totalmean$Max)
-anova_test(totalmean,Max~Site)
+bartlett.test(Max ~ Site, data = totalmean)
 pairwise.t.test(totalmean$Max, totalmean$Site)
 shapiro.test(totalmean$Min)
 kruskal.test(totalmean$Min,totalmean$Site)
@@ -89,8 +92,93 @@ pairwise.wilcox.test(totalmean$Range,totalmean$Site)
 aggregate(Range~Site,totalmean,mean)
 aggregate(Range~Site,totalmean,sem)
 
+##long term temperature
+chenal<-read_excel("Data/Chenal_2018.xlsx")
+chenal$time<-paste(chenal$date,substr(chenal$Heure,12,20))                  
+colnames(chenal)[2]<-'Temp_chenal'
+chenal$time<-as.POSIXct(chenal$time,format="%Y-%m-%d %H:%M:%OS",tz="Pacific/Tahiti")
+chenal$Temp_chenal<-as.numeric(chenal$Temp_chenal)
+chenal20<-subset(chenal, grepl('^2020', chenal$date))
+F1<-read_excel("Data/F1_2018-2021.xlsx")
+F1$timestamp<-paste(F1$date,substr(F1$heure,12,20),F1$pm)                  
+F1$time<-as.POSIXct(F1$timestamp,format="%Y-%m-%d %I:%M:%OS %p",tz="Pacific/Tahiti")
+F1$Temp_F<-as.numeric(F1$Temp_F)
+total<-left_join(F1,chenal,by="time")
+
+temp<-ggplot(total,aes(x=time))+ylab("Water temperature (°C)")+xlab("")+
+  geom_line(aes(y = Temp_F), color = "#5BD9D9")+
+  geom_line(aes(y = Temp_chenal), color = "#f0aa7f")+
+  scale_x_datetime(date_labels = "%Y-%m",date_breaks="1 month")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_hline(yintercept=31,color="#bf4d58")
+temp
+ggsave("Output/longtemp.jpg",temp,width = 9, height = 4)
+
 
 ##Nutrients
+nuts<-read_xlsx("Data/Nutrients.xlsx")
+sand<-nuts %>% filter(Sample=="Sand")
+water<-nuts %>% filter(Sample=="Water")
+
+pca1<-PCA(sand[,5:9])
+pca.vars <- pca1$var$coord %>% data.frame
+pca.vars$vars <- rownames(pca.vars)
+pca.vars.m <- melt(pca.vars, id.vars = "vars")
+sand$pc1 <- pca1$ind$coord[, 1]
+sand$pc2 <- pca1$ind$coord[, 2]
+Pca1<-ggplot(data = sand, aes(x = pc1, y = pc2,color=Site)) +
+  geom_point()+
+  scale_color_manual(values=cytcolors)+
+  geom_segment(data = pca.vars, inherit.aes =F, aes(x = 0, xend = Dim.1*2, y = 0, 
+                                                    yend = Dim.2*2),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  geom_text(data = pca.vars, inherit.aes =F,
+            aes(x = Dim.1*2.5, y =  Dim.2*2.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (48.45% variance)",y="PCA2 (35.77% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="none")+
+  ggtitle("Sand")
+Pca1
+
+pca2<-PCA(water[,5:9])
+pca.vars <- pca2$var$coord %>% data.frame
+pca.vars$vars <- rownames(pca.vars)
+pca.vars.m <- melt(pca.vars, id.vars = "vars")
+water$pc1 <- pca2$ind$coord[, 1]
+water$pc2 <- pca2$ind$coord[, 2]
+Pca2<-ggplot(data = water, aes(x = pc1, y = pc2,color=Site)) +
+  geom_point()+
+  scale_color_manual(values=cytcolors)+
+  geom_segment(data = pca.vars, inherit.aes =F, aes(x = 0, xend = Dim.1*2, y = 0, 
+                                                    yend = Dim.2*2),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  geom_text(data = pca.vars, inherit.aes =F,
+            aes(x = Dim.1*2.5, y =  Dim.2*2.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (41.58% variance)",y="PCA2 (28.32% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="right")+
+  ggtitle("Water")
+Pca2
+
+nutrients<-ggarrange(Pca1,Pca2,widths=c(0.8,1))
+nutrients
+ggsave("Output/nutrients.jpg",nutrients,width = 7, height = 3)
+
+kruskal.test(sand$'SI(OH)4',sand$Site)
+kruskal.test(water$PO4,water$Site)
+library(dunn.test)
+dunn.test(sand$'SI(OH)4',sand$Site,method="holm")
+dunn.test(water$'SI(OH)4',water$Site,method="holm")
+
+
+##Algal nitrogen
 dt1 <-read.csv("Data/mcr_lter_macroalgaeN.csv",header=F 
                ,skip=1
                ,sep=","  
@@ -113,6 +201,7 @@ colnames(replace)[1]<-"Site"
 replace$New<-c("Nursery","Manava","Linareva","Mahana")
 dt3<-FindReplace(dt3,"Site",replace,"Site","New",exact=TRUE, vector=FALSE)
 shapiro.test(dt3$N)
+bartlett.test(N ~ Site, data = dt3)
 anova_test(dt3,N~Site)
 pairwise.t.test(dt3$N,dt3$Site)
 aggregate(N~Site,dt3,mean)
@@ -131,6 +220,7 @@ pairwise.wilcox.test(transects3$'Live coral',transects3$Site)
 aggregate(transects3$'Live coral'~Site,transects3,mean)
 aggregate(transects3$'Live coral'~Site,transects3,sem)
 shapiro.test(transects3$Macroalgae)
+bartlett.test(Macroalgae ~ Site, data = transects3)
 anova_test(transects3,Macroalgae~Site)
 pairwise.t.test(transects3$Macroalgae,transects3$Site)
 aggregate(Macroalgae~Site,transects3,mean)
@@ -155,6 +245,7 @@ aggregate(Porites~Site,transects6,sem)
 genera<-ddply(transects,c('Site','transect','Genus'),summarise,n=length(Genus))
 genera2<-ddply(genera,c('Site','transect'),summarise,genus=length(Genus)-1)
 shapiro.test(genera2$genus)
+bartlett.test(genus ~ Site, data = genera2)
 anova_test(genera2,genus~Site)
 aggregate(genus~Site,genera2,mean)
 aggregate(genus~Site,genera2,sem)
@@ -258,6 +349,97 @@ legend(
 ## save as pdf width 9 height 5
 ## save as svg width 570 height 360
 
+##spiderplot with added nutrients
+df<-ddply(totalmean,("Site"),summarise,Mean_Temp=mean(Mean), Daily_Range=mean(Range))
+df$Coral_Cover<-c(mean(transects3$'Live coral'[transects3$Site=="Linareva"]),
+                  mean(transects3$'Live coral'[transects3$Site=="Mahana"]),
+                  mean(transects3$'Live coral'[transects3$Site=="Manava"]),0)
+df$Algal_Cover<-c(mean(transects3$Macroalgae[transects3$Site=="Linareva"]),
+                  mean(transects3$Macroalgae[transects3$Site=="Mahana"]),
+                  mean(transects3$Macroalgae[transects3$Site=="Manava"]),0)
+df$Generic_Richness<-c(mean(genera2$genus[genera2$Site=="Linareva"]),
+                       mean(genera2$genus[genera2$Site=="Mahana"]),
+                       mean(genera2$genus[genera2$Site=="Manava"]),0)
+df$Nitrogen<-c(mean(dt3$N[dt3$Site=="Linareva"]),
+               mean(dt3$N[dt3$Site=="Mahana"]),
+               mean(dt3$N[dt3$Site=="Manava"]),
+               mean(dt3$N[dt3$Site=="Nursery"]))
+df$NH4<-c(mean(sand$NH4[sand$Site=="Linareva"]),
+               mean(sand$NH4[sand$Site=="Mahana"]),
+               mean(sand$NH4[sand$Site=="Manava"]),
+               mean(sand$NH4[sand$Site=="Nursery"]))
+df$SIO<-c(mean(sand$'SI(OH)4'[sand$Site=="Linareva"]),
+          mean(sand$'SI(OH)4'[sand$Site=="Mahana"]),
+          mean(sand$'SI(OH)4'[sand$Site=="Manava"]),
+          mean(sand$'SI(OH)4'[sand$Site=="Nursery"]))
+df$NO3<-c(mean(water$NO3[water$Site=="Linareva"]),
+          mean(water$NO3[water$Site=="Mahana"]),
+          mean(water$NO3[water$Site=="Manava"]),
+          mean(water$NO3[water$Site=="Nursery"]))
+df$PO4<-c(mean(water$PO4[water$Site=="Linareva"]),
+          mean(water$PO4[water$Site=="Mahana"]),
+          mean(water$PO4[water$Site=="Manava"]),
+          mean(water$PO4[water$Site=="Nursery"]))
+
+max_min <- data.frame(
+  Mean_Temp=c(28,26),
+  Daily_Range=c(2,0),
+  Coral_Cover=c(100,0),
+  Algal_Cover=c(100,0),
+  Generic_Richness=c(10,0),
+  Nitrogen=c(0.8,0.6),
+  NH4=c(13,0),
+  SIO=c(10,0),
+  NO3=c(0.5,0),
+  PO4=c(0.5,0))
+rownames(max_min) <- c("Max", "Min")
+
+df2<-df[,-1]
+row.names(df2)<-df$Site
+df2<-rbind(max_min,df2)
+colnames(df2)
+
+create_beautiful_radarchart <- function(data, color = c("#BC4B07","#D3BC38","#5BA7A3","#424242")  , 
+                                        vlabels = c( "Mean Temperature \n (26-28°C)",
+                                                     "Daily Range \n (0-2°C)",
+                                                     "Coral cover \n (0-100%)",
+                                                     "Algal cover \n (0-100%)",
+                                                     "Coral diversity \n (0-10 genera)",
+                                                     "Nitrogen \n (0.6-0.8%)",
+                                                     "NH4 in sand \n (0-13 µmol/L)",
+                                                     "Si(OH)4 in sand \n (0-10 µmol/L)",
+                                                     "N03 in water \n (0-0.5 µmol/L)",
+                                                     "PO4 in water \n (0-0.5 µmol/L)"),
+                                        vlcex = 0.7,
+                                        caxislabels = c(0, 25, 50, 75, '100'), title = NULL, ...){
+  radarchart(
+    data, axistype = 1,
+    # Customize the polygon
+    pcol = color, pfcol = scales::alpha(color, 0.1), plwd = 2, plty = 1,
+    # Customize the grid
+    cglcol = "grey", cglty = 1, cglwd = 0.8,
+    # Customize the axis
+    axislabcol = "grey", 
+    # Variable labels
+    vlcex = vlcex, vlabels = vlabels,
+    caxislabels = caxislabels, title = title, ...
+  )
+}
+
+
+op <- par(mar = c(1, 1, 1, 1))
+create_beautiful_radarchart(df2)
+legend(
+  x = "right", legend = rownames(df2[-c(1,2),]), horiz = F,
+  bty = "n", pch = 15 , col = c("#BC4B07","#D3BC38","#5BA7A3","#424242"),
+  text.col = "black", cex = 0.8, pt.cex = 1,y.intersp=2
+)
+
+## save as pdf width 9 height 5
+## save as svg width 570 height 360
+
+
+
 ##Survival
 monitoring<-read_xlsx("Data/monitoring.xlsx")
 surv<-monitoring %>% filter(dead==1)
@@ -360,6 +542,11 @@ growth$colony<-as.factor(growth$colony)
 growth$days<-as.numeric(growth$date2-growth$date1)
 growth$gf<-(growth$final_size-growth$Initial_size)*100/(growth$Initial_size*growth$days)
 growth1<-growth %>% filter(Time!="total" & Treatment=="Transplant")
+sumg<-ddply(growth1,c("Site","State"),summarize, total=length(State))
+bysite<-aggregate(Time~Site,growth1,length)
+sumg<-left_join(sumg,bysite,by="Site")
+sumg$percent<-sumg$total*100/sumg$Time
+
 mod1<-glmer(survival~final_size+Genotype*Site+Time+State+gf+(1|colony),growth1,family=binomial)
 Anova(mod1,type=3)
 emmeans(mod1,pairwise~Time)
@@ -535,7 +722,7 @@ aggregate(gf~year, yearly2, mean)
 aggregate(gf~year, yearly2, sem)
 pairwise.wilcox.test(yearly2$gf,yearly2$site)
 
-yearplot<-ggplot(yearly, aes(x=year,y=gf,fill=Site)) +
+yearplot<-ggplot(yearly, aes(x=year,y=gf,fill=site)) +
   geom_boxplot()+
   theme_bw()+
   ylab("Growth (% per day)")+
@@ -658,6 +845,15 @@ Abundance$site<-as.character(Abundance$colony)
 Abundance<-FindReplace(Abundance,"site",sites,"colony","site",exact=TRUE, vector=FALSE)
 Abundance[nchar(Abundance$site)<5,206]<-"Nursery"
 
+Abund2<-Abundance
+Abund2[,2:202] <- mutate_all(Abund2[,2:202], function(x) as.numeric(as.character(x)))
+Abund2[,2:202]<-ceiling(Abund2[,2:202])
+Abund2$sum<-rowSums(Abund2[,2:202])
+mean(Abund2$sum)
+sem(Abund2$sum)
+
+
+
 ##20 most abundant classes
 Abund<-gather(Abundance,strain,percent,c(2:202))
 ITS2 <- mutate_all(Abundance[,2:202], function(x) as.numeric(as.character(x)))
@@ -670,13 +866,13 @@ sum[1,]<-ITS2[193,]
 sum <- mutate_all(sum, function(x) as.numeric(as.character(x)))
 sum2<-gather(sum,strain,percent,c(1:201))
 sum2$clade<-"A"
-sum2$clade[79:149]<-"C"
+sum2$clade[79:148]<-"C"
 sum2$clade[149:201]<-"D"
 sum(sum2$percent)
 sum3<-ddply(sum2,c("clade"),summarize,percent=sum(percent)/192)
 sum(sum3$percent)
 sum2$new<-"Other A"
-sum2$new[79:149]<-"Other C"
+sum2$new[79:148]<-"Other C"
 sum2$new[149:201]<-"Other D"
 unique(sum2$new)
 sum2$new[sum2$percent>1.1]<-sum2$strain[sum2$percent>1.1]
@@ -727,6 +923,71 @@ ggsave("Output/symbionts.jpg",fig,width = 10, height = 5.5)
 ggsave("Output/symbionts.pdf",fig,width = 10, height = 5.5)
 ggsave("Output/symbionts.svg",fig,width = 10, height = 5.5)
 
+#ITS2 profiles
+ITS2Profil <- read.table("Data/ITS2Profiles.txt", sep = "\t", fill=T,header=T,dec=",")
+ITS2Profil <- ITS2Profil[-c(1:5,13,196,200:202),c(2:length(ITS2Profil))]
+names(ITS2Profil) <- as.character(unlist(ITS2Profil[1,]))
+ITS2Profil<-ITS2Profil[-1,]
+colnames(ITS2Profil)[1]<-"sample_name"
+
+ITS2Profil$colony<-map(strsplit(ITS2Profil$sample_name, split = "_"), 1)
+ITS2Profil$time<-map(strsplit(ITS2Profil$sample_name, split = "_"),2)
+ITS2Profil$genotype<-substr(ITS2Profil$colony,1,nchar(ITS2Profil$colony)-2)
+ITS2Profil$site<-as.character(ITS2Profil$colony)
+ITS2Profil<-FindReplace(ITS2Profil,"site",sites,"colony","site",exact=TRUE, vector=FALSE)
+ITS2Profil[nchar(ITS2Profil$site)<5,35]<-"Nursery"
+unique(ITS2Profil$site)
+##remove A16 profile which is 0
+ITS2Profil<-ITS2Profil[,-11]
+ITS2Profil$name<-substr(ITS2Profil$site, 0, 3)
+
+ITS2Profil[,2:30] <- mutate_all(ITS2Profil[,2:30], function(x) as.numeric(as.character(x)))
+ITS2Profil$sum<-rowSums(ITS2Profil[,2:30])
+ITS2Profil[,2:30]<-ITS2Profil[,2:30]/ITS2Profil[,36]
+ITS2Profil$sum2<-rowSums(ITS2Profil[,2:30])
+
+Profilesum <- mutate_all(ITS2Profil[,2:30], function(x) as.numeric(as.character(x)))
+Profilesum<- Profilesum%>%
+  bind_rows(summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+which(Profilesum[192,]<1)+1
+
+ITS2Profil2<-ITS2Profil[,-c(which(Profilesum[192,]<1)+1)]
+ITS2Profil2$sum<-rowSums(ITS2Profil2[,2:19])
+ITS2Profil2[,2:19]<-ITS2Profil2[,2:19]/ITS2Profil2[,25]
+ITS2Profil2$sum2<-rowSums(ITS2Profil2[,2:19])
+
+graph<-gather(ITS2Profil2,profile,percent,c(2:19))
+graph$percent<-as.numeric(graph$percent)
+graph$colony<-as.character(graph$colony)
+graph$time<-as.character(graph$time)
+graph$genotype<-factor(graph$genotype,c("2","3","4","5","7","8","9","10"))
+colors18<-c("#BC4B07","#6E4465","#db6c04","#c70223","#732D3D","#E3423F","#f09ed6",
+           "#D3BC38",  "#328F37","#a3ad32","#46bf3d","#e3d12b","#234f20",
+           "#1e73b0","#3ca3bd", "#3453A8" ,"#1623cc","#6FCAF7")
+
+
+fig<-ggplot(graph, aes(x=colony, y=percent*100, fill=profile)) +
+  geom_bar(stat="identity", width=0.9)+
+  theme(panel.background = element_rect(fill = "white"),
+        axis.text.x = element_blank(),legend.text.align = 0,
+        axis.ticks.x = element_blank(),
+        panel.spacing = unit(0.1, "lines"))+
+  facet_grid(time~genotype+fct_rev(name),scale='free')+
+  ylab("Symbiont profile relative abundance %")+
+  scale_fill_manual(values=colors18)+
+  xlab("Colony")+
+  guides(fill=guide_legend(ncol =1))
+fig
+
+ggsave("Output/symbiontprofiles.jpg",fig,width = 12, height = 5)
+ggsave("Output/symbiontprofiles.svg",fig,width = 12, height = 5)
+
+Abund3<-ITS2Profil
+Abund3[,2:30]<-ceiling(Abund3[,2:30])
+Abund3$sum<-rowSums(Abund3[,2:30])
+mean(Abund3$sum)
+sem(Abund3$sum)
+
 #stats with full diversity
 Abundance<-as.data.frame(Abundance)
 Abundance$time<-as.character(Abundance$time)
@@ -736,17 +997,22 @@ Abundance$site2[Abundance$time=="T0"]<-"Nursery"
 Abundance[,2:202]<-mutate_all(Abundance[,2:202], function(x) as.numeric(as.character(x)))
 Abundance$treatment<-"Transplant"
 Abundance$treatment[Abundance$site2=="Nursery"]<-"Control"
+Abundance$Origin<-Abundance$genotype
+Abundance<-FindReplace(Abundance,"Origin",genotypes,from="Gen",to="Origin",exact=TRUE,vector=FALSE)
 dist <- vegdist(Abundance[,2:202], method="bray") 
+
 permanova<-adonis2(dist ~ genotype*treatment*time, data=Abundance, permutations=9999)
 permanova
+permanova<-adonis2(dist ~ Origin+genotype*site2*time, data=Abundance, permutations=9999)
 permanova<-adonis2(dist ~ genotype*site2*time, data=Abundance, permutations=9999)
 permanova
-model<-Abundance %>% filter(site=="Nursery")
+model<-Abundance %>% filter(site2=="Nursery")
 dist <- vegdist(model[,2:202], method="bray") 
 permanova <- adonis2(dist ~ genotype*time, data=model, permutations=9999)
 permanova
 
 model<-Abundance %>% filter(time=="T0")
+aggregate(time~genotype,model,length)
 dist <- vegdist(model[,2:202], method="bray")
 adonis2(dist ~ genotype*site, data=model, permutations=9999)
 pairwise.adonis(dist, factors = model$genotype, p.adjust.m = "BH")
@@ -766,16 +1032,21 @@ permanova <- adonis2(dist ~ genotype*site, data=model, permutations=9999)
 permanova <- adonis2(dist ~ genotype*treatment, data=model, permutations=9999)
 permanova
 
-model<-Abundance %>% filter(time=="T12" & genotype=="8")
+model<-Abundance %>% filter(time!="T27" & genotype=="7")
 dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
 pairwise.adonis(dist, factors = model$treatment, p.adjust.m = "BH")
+kruskal.test(model$A1ee,model$treatment)
+kruskal.test(model$C3ae,model$time)
 
-model<-Abundance %>% filter(genotype=="9")
+model<-Abundance %>% filter(genotype=="10")
 dist <- vegdist(model[,2:202], method="bray")
 adonis2(dist ~ site2*time, data=model, permutations=9999)
 pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
 pairwise.adonis(dist, factors = model$site2, p.adjust.m = "BH")
+pairwise.wilcox.test(model$A1ee,model$time)
+pairwise.wilcox.test(model$D1,model$time)
+pairwise.wilcox.test(model$C3ae,model$time)
 
 model<-Abundance %>% filter(genotype=="10" & site=="Nursery")
 dist <- vegdist(model[,2:202], method="bray")
@@ -784,6 +1055,10 @@ pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
 model<-Abundance %>% filter(genotype=="10" & time=="T12")
 dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
+
+model<-Abundance %>% filter(genotype=="3")
+dist <- vegdist(model[,2:202], method="bray")
+pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
 
 symsp<-mvabund(Abundance[,2:202])
 mod1 <- manyglm(symsp ~ Abundance$genotype*Abundance$site2*Abundance$time, family = "negative_binomial")
@@ -830,9 +1105,11 @@ dist <- vegdist(model[,2:202], method="bray")
 adonis2(dist ~ genotype*time, data=model, permutations=9999)
 pairwise.adonis(dist, factors = model$time, p.adjust.m = "BH")
 
-model<-Abundance %>% filter(time=="T27" & genotype=="10")
+model<-Abundance %>% filter(time=="T12" & genotype=="10")
 dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$treatment, p.adjust.m = "BH")
+kruskal.test(model$D1,model$treatment)
+
 model<-Abundance %>% filter(time=="T27")
 dist <- vegdist(model[,2:202], method="bray")
 pairwise.adonis(dist, factors = model$site, p.adjust.m = "BH")
@@ -885,8 +1162,6 @@ fig<-ggplot(graph, aes(x=colony, y=percent*100, fill=strain)) +
   xlab("Colony")
 fig
 
-
-
 M=cor(data[,6:13],use="pairwise.complete.obs")
 res1 <- cor.mtest(data[,6:13], conf.level = 0.95)
 pvalues<-as.data.frame(res1$p)
@@ -914,24 +1189,137 @@ pca.vars$vars <- rownames(pca.vars)
 pca.vars.m <- melt(pca.vars, id.vars = "vars")
 data$pc1 <- pca1$ind$coord[, 1]
 data$pc2 <- pca1$ind$coord[, 2]
+data$Genotype<-data$genotype
+data$Genotype<-factor(data$Genotype, c("2","3","4","5","7","8","9","10"))
+data$Site<-data$site
+data$Site[data$time=="T0"]<-"Nursery"
+data$Time<-data$time
 
-Pca<-ggplot(data = data, aes(x = pc1, y = pc2,color=genotype,shape=site)) +
+Pca1<-ggplot(data = data, aes(x = pc1, y = pc2,color=Genotype,shape=Site,group=Genotype)) +
   geom_point()+
-  facet_grid(~time)+
   geom_segment(data = pca.vars, inherit.aes =F, aes(x = 0, xend = Dim.1*3, y = 0, 
                                                     yend = Dim.2*3),
                arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
                lwd = 0.5)+
+  stat_ellipse( aes(color = Genotype), 
+                show.legend = FALSE, 
+                level = 0.95)+
   geom_text(data = pca.vars, inherit.aes =F,
             aes(x = Dim.1*3.5, y =  Dim.2*3.5,label=vars), 
             check_overlap = F, size = 3) +
-  labs(x="PCA1 (38.95% variance)",y="PCA2 (22.17% variance)")+
+  labs(x="PCA1 (34.82% variance)",y="PCA2 (19.58% variance)")+
   geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
   geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
   theme_minimal()+theme(legend.position="right")
+Pca1
+
+colors8<-c("#BC4B07","#6E4465","#c70223","#f09ed6",
+            "#D3BC38",  "#328F37",
+           "#6FCAF7", "#1623cc")
+
+
+colors18<-c("#BC4B07","#6E4465","#db6c04","#c70223","#732D3D","#E3423F","#f09ed6",
+            "#D3BC38",  "#328F37","#a3ad32","#46bf3d","#e3d12b","#234f20",
+            "#1e73b0","#3ca3bd", "#3453A8" ,"#1623cc","#6FCAF7")
+Pca2<-ggplot(data = data, aes(x = pc1, y = pc2,color=Genotype,shape=Time,group=Time)) +
+  geom_point()+
+  geom_segment(data = pca.vars, inherit.aes =F, aes(x = 0, xend = Dim.1*3, y = 0, 
+                                                    yend = Dim.2*3),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  scale_color_manual(values=colors8)+
+  stat_ellipse( aes(group = Time), 
+                show.legend = FALSE, 
+                level = 0.95)+
+  geom_text(data = pca.vars, inherit.aes =F,
+            aes(x = Dim.1*3.5, y =  Dim.2*3.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (34.82% variance)",y="PCA2 (19.58% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="right")
+Pca2
+Pca<-ggarrange(Pca1,Pca2)
 Pca
-ggsave("Output/PCA.jpg",Pca,width=9,height=4)
-ggsave("Output/PCA.svg",Pca,width=9,height=4)
+ggsave("Output/PCA.pdf",Pca,width=10,height=4)
+ggsave("Output/PCA.svg",Pca,width=10,height=4)
+ggsave("Output/PCA.jpg",Pca2,width=5,height=4)
+
+##PCA by time
+model<-data %>% filter(time=="T0")
+pcaT0<-PCA(model[,c(6:8,10:13)])
+pca.varsT0 <- pcaT0$var$coord %>% data.frame
+pca.varsT0$vars <- rownames(pca.varsT0)
+pca.vars.mT0 <- melt(pca.varsT0, id.vars = "vars")
+model$pc1 <- pcaT0$ind$coord[, 1]
+model$pc2 <- pcaT0$ind$coord[, 2]
+PcaT0<-ggplot(data = model, aes(x = pc1, y = pc2,color=Genotype)) +
+  geom_point()+
+  geom_segment(data = pca.varsT0, inherit.aes =F, aes(x = 0, xend = Dim.1*3, y = 0, 
+                                                    yend = Dim.2*3),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  scale_color_manual(values=colors8)+
+  geom_text(data = pca.varsT0, inherit.aes =F,
+            aes(x = Dim.1*3.5, y =  Dim.2*3.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (32.89% variance)",y="PCA2 (27.38% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="none",
+                        plot.title = element_text(hjust = 0.5))+ggtitle("T0")+ylim(-4.5,4.5)+xlim(-4.5,4.5)
+PcaT0
+
+modelT12<-data %>% filter(time=="T12")
+pcaT12<-PCA(modelT12[,c(6:13)])
+pca.varsT12 <- pcaT12$var$coord %>% data.frame
+pca.varsT12$vars <- rownames(pca.varsT12)
+pca.vars.mT12 <- melt(pca.varsT12, id.vars = "vars")
+modelT12$pc1 <- pcaT12$ind$coord[, 1]
+modelT12$pc2 <- pcaT12$ind$coord[, 2]
+PcaT12<-ggplot(data = modelT12, aes(x = pc1, y = pc2,color=Genotype)) +
+  geom_point()+
+  geom_segment(data = pca.varsT12, inherit.aes =F, aes(x = 0, xend = Dim.1*3, y = 0, 
+                                                    yend = Dim.2*3),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  scale_color_manual(values=colors8)+
+  geom_text(data = pca.varsT12, inherit.aes =F,
+            aes(x = Dim.1*3.5, y =  Dim.2*3.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (35.76% variance)",y="PCA2 (28.41% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="none",
+                        plot.title = element_text(hjust = 0.5))+ggtitle("T12")+ylim(-4.5,4.5)+xlim(-4.5,4.5)
+PcaT12
+
+modelT27<-data %>% filter(time=="T27")
+pcaT27<-PCA(modelT27[,c(7:12)])
+pca.varsT27 <- pcaT27$var$coord %>% data.frame
+pca.varsT27$vars <- rownames(pca.varsT27)
+pca.vars.mT27 <- melt(pca.varsT27, id.vars = "vars")
+modelT27$pc1 <- pcaT27$ind$coord[, 1]
+modelT27$pc2 <- pcaT27$ind$coord[, 2]
+PcaT27<-ggplot(data = modelT27, aes(x = pc1, y = pc2,color=Genotype)) +
+  geom_point()+
+  geom_segment(data = pca.varsT27, inherit.aes =F, aes(x = 0, xend = Dim.1*3, y = 0, 
+                                                    yend = Dim.2*3),
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 0.5)+
+  scale_color_manual(values=colors8)+
+  geom_text(data = pca.varsT27, inherit.aes =F,
+            aes(x = Dim.1*3.5, y =  Dim.2*3.5,label=vars), 
+            check_overlap = F, size = 3) +
+  labs(x="PCA1 (44.61% variance)",y="PCA2 (28.93% variance)")+
+  geom_hline(yintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  geom_vline(xintercept = 0, lty = 2, color = "grey", alpha = 0.9) +
+  theme_minimal()+theme(legend.position="right",
+                        plot.title = element_text(hjust = 0.5))+ggtitle("T27")+ylim(-4.5,4.5)+xlim(-4.5,4.5)
+PcaT27
+Pca<-ggarrange(PcaT0,PcaT12,PcaT27)
+Pca
+ggsave("Output/PCAbytime.jpg",Pca,width=7,height=7)
 
 datafin<-data %>% filter(colony %in% data$colony[data$time=="T27"])
 pca1<-PCA(datafin[,7:12])
@@ -958,3 +1346,41 @@ Pca<-ggplot(data = datafin, aes(x = pc1, y = pc2,color=genotype,shape=site)) +
 Pca
 ggsave("Output/PCA2.jpg",Pca,width=8,height=4)
 ggsave("Output/PCA2.svg",Pca,width=8,height=4)
+
+#evolution of symbiont genera
+genera<-ITS2_4[,c(3,4,5,31,32,33)]
+colnames(genera)[4]<-"Symbiodinium"
+colnames(genera)[5]<-"Cladocopium"
+colnames(genera)[6]<-"Durusdinium"
+genera$treatment<-"Transplant"
+genera$treatment[genera$site=="Nursery"]<-"Control"
+model<-genera %>% filter(time=="T12" & genotype=="10")
+kruskal.test(model$Cladocopium,model$treatment)
+kruskal.test(model$Durusdinium,model$treatment)
+model<-genera %>% filter(time=="T27")
+kruskal.test(model$Symbiodinium,model$site)
+model<-genera %>% filter(time!="T0")
+kruskal.test(model$Cladocopium,model$site)
+model<-genera %>% filter(genotype=="3")
+pairwise.wilcox.test(model$Durusdinium,model$time)
+pairwise.wilcox.test(model$Symbiodinium,model$time)
+pairwise.wilcox.test(model$Cladocopium,model$time)
+
+genera2<-gather(genera,Genus,percent,c(4:6))
+meangenus<-ddply(genera2,c("genotype","time","Genus"),summarize,perc=mean(percent))
+
+genera3<-ddply(genera2,c("time","Genus"),summarize,perc=mean(percent),x=sem(percent))
+genera3$Genus<-factor(genera3$Genus,c("Symbiodinium", "Cladocopium" , "Durusdinium"))
+colors3<-c("#BC4B07","#a3ad32","#1e73b0")                 
+genus<-ggplot(genera3, aes(x = time, y = perc, col=Genus))+
+  geom_point(size = 4)+
+  geom_line(lwd=0.9)+
+  ylab("Relative abundance %")+
+  geom_errorbar(aes(ymin=perc-x, ymax=perc+x),width = 0.1)+
+  scale_color_manual(values = colors3)+
+  theme_bw()+
+  theme(legend.text = element_text(face = "italic"))
+
+ggsave("Output/genera_evolution.pdf",genus,width=5,height=4)
+ggsave("Output/genera_evolution.svg",genus,width=5,height=4)
+
